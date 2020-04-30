@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ping
+
+  SystemName:
+    Type: String
+    Default: vpc
+
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: test
+
+  VpcCIDR:
+    Description: CIDR for VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PrivateSubnet1CIDR:
+    Description: CIDR for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.20.0/24
+
+  PrivateSubnet2CIDR:
+    Description: CIDR for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.21.0/24
+
+  TestServerPrivateIpAddress:
+    Description: Test server private ip address
+    Type: String
+    Default: 10.0.20.99
+
+  TestServerPortNumber:
+    Type: String
+    Description: >
+      Port on which to listen for incoming requests
+    Default: 80
+
+  AmazonLinuxLatestAmi:
+      Type : AWS::SSM::Parameter::Value<String>
+      Default: /aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2
+
+  InstanceType:
+    Type: String
+    Default: t2.nano
+
+
+Resources:
+
+  TestServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Test Server
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      ImageId: !Ref AmazonLinuxLatestAmi
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: EC2IAMRole
+    Properties:
+      InstanceProfileName: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-profile
+      Path: /
+      Roles:
+      - !Ref EC2IAMRole
+
+  EC2IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: iam-role-for-ec2
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+            - sts:AssumeRole
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: TestEC2SecurityGroup
+      GroupDescription: Test Server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: !Ref TestServerPortNumber
+        ToPort: !Ref TestServerPortNumber
+        Description: Test Server
+      Tags:
+      - Key: Name
+        Value: Test Group
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-VPC
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${SystemName}-${EnvironmentName} Private Subnet (AZ1)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${SystemName}-${EnvironmentName} Private Subnet (AZ2)
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${SystemName}-${EnvironmentName} Private Routes (AZ1)
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${SystemName}-${EnvironmentName} Private Routes (AZ2)
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-VPC
+
+  PrivateSubnet1:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-private-subnet-1
+
+  PrivateSubnet2:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-private-subnet-2
+
+  EC2SecurityGroupId:
+    Description: A reference to the security group id of EC2 Instance
+    Value: !GetAtt EC2SecurityGroup.GroupId
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-ec2-sg-id
+
+  TestServerPrivateDnsName:
+    Description: DNS Name of Test server
+    Value: !GetAtt TestServer.PrivateDnsName
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-sv-dns
+
+  TestServerPortNumber:
+    Description: Test server private ip address
+    Value: !Ref TestServerPortNumber
+    Export:
+      Name: !Sub ${ProjectName}-${SystemName}-${EnvironmentName}-sv-port
+

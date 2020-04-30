@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ping
+
+  SystemName:
+    Type: String
+    Default: vpclambda
+
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: test
+
+  VPCSystemName:
+    Type: String
+    Default: vpc
+
+
+Resources:
+
+  VpcLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  VpcLambdaExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: VpcLambdaExecutionPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DetachNetworkInterface
+              - ec2:DeleteNetworkInterface
+            Resource: "*"
+      Roles:
+        - !Ref VpcLambdaExecutionRole
+
+  VPCLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: pingLambda
+      Role: !GetAtt VpcLambdaExecutionRole.Arn
+      Runtime: python3.7
+      Handler: lambda_function.lambda_handler
+      CodeUri: lambda/
+      Timeout: 300
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-1
+          - Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-2
+      Environment:
+        Variables:
+          TEST_SERVER_PORT_NO:
+            Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-sv-port
+          TEST_SERVER_DNS_NAME:
+            Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-sv-dns
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-VPC
+      GroupName: "VPCLambda"
+      GroupDescription: "VPC Lambda"
+
+  # Let's allow access from Lambda in the EC2 security group.
+  # Also, in order to ping from a Lambda function in a different Subnet,
+  # it is necessary to set it in routing.
+  EC2SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: LambdaSecurityGroup
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-ec2-sg-id
+      IpProtocol: tcp
+      ToPort: 80
+      FromPort: 80
+      SourceSecurityGroupId: !GetAtt LambdaSecurityGroup.GroupId
+      SourceSecurityGroupOwnerId: !Ref AWS::AccountId
